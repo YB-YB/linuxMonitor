@@ -385,3 +385,6 @@ metrics/
 # 配置文件备份
 *.conf.bak
 *.config.bak
+
+# 忽略codebuddy
+.codebuddy/
