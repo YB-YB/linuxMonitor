@@ -2,12 +2,12 @@ import os
 import platform
 import socket
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 import psutil
 
-from app.core.logging_config import get_logger
-from app.models.monitor import (
+from ..core.logging_config import get_logger
+from ..models.monitor import (
     CpuInfo,
     DiskInfo,
     MemoryInfo,
@@ -31,7 +31,7 @@ class MonitorService:
     _cached_memory_info = None
     _cached_disk_info = None
     _cached_network_info = None
-    _cached_processes = []
+    _cached_processes: list[ProcessInfo] = []
 
     # 记录各模块数据的最后更新时间
     _last_system_update_time = 0
@@ -339,7 +339,7 @@ class MonitorService:
                 timestamp=int(current_time * 1000),
             )
 
-    def get_network_interfaces(self) -> List[NetworkInterface]:
+    def get_network_interfaces(self) -> list[NetworkInterface]:
         """获取网络接口信息"""
         interfaces = []
         try:
@@ -453,10 +453,10 @@ class MonitorService:
             )
 
     # 缓存开放端口数据
-    _cached_open_ports: List[OpenPort] = []
+    _cached_open_ports: list[OpenPort] = []
     _last_ports_update_time = 0
 
-    def get_open_ports(self) -> List[OpenPort]:
+    def get_open_ports(self) -> list[OpenPort]:
         """获取开放端口列表"""
         current_time = time.time()
 
@@ -477,7 +477,23 @@ class MonitorService:
                 # 转换为 OpenPort 对象
                 for conn in listening_connections:
                     try:
-                        port = conn.laddr.port
+                        # 安全地获取端口号
+                        port: int = 0
+                        try:
+                            if hasattr(conn.laddr, 'port'):
+                                # 使用 getattr 来避免类型检查器的警告
+                                port_value = getattr(conn.laddr, 'port', None)
+                                if port_value is not None:
+                                    port = int(port_value)
+                                else:
+                                    continue
+                            elif isinstance(conn.laddr, tuple) and len(conn.laddr) >= 2:
+                                port = int(conn.laddr[1])
+                            else:
+                                continue  # 跳过无法获取端口的连接
+                        except (ValueError, TypeError, AttributeError):
+                            continue  # 跳过无法解析端口的连接
+                            
                         protocol = "tcp"  # psutil 主要返回 TCP 连接
                         status = "listening"
 
@@ -492,27 +508,8 @@ class MonitorService:
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
 
-                        # 确保 port 是整数
-                        port_num = 0
-                        try:
-                            # 尝试不同的方式获取端口号
-                            if hasattr(conn.laddr, "port"):
-                                port_num = conn.laddr.port
-                            elif isinstance(conn.laddr, tuple) and len(conn.laddr) > 1:
-                                # 如果 laddr 是元组，尝试获取第二个元素作为端口
-                                port_num = conn.laddr[1]
-                            else:
-                                # 尝试将 laddr 转换为字符串并解析
-                                laddr_str = str(conn.laddr)
-                                if ":" in laddr_str:
-                                    port_str = laddr_str.split(":")[-1].strip(")")
-                                    if port_str.isdigit():
-                                        port_num = int(port_str)
-                        except Exception as e:
-                            logger.debug(f"解析端口号失败: {e}, laddr: {conn.laddr}")
-
                         open_port = OpenPort(
-                            port=port_num,
+                            port=port,
                             protocol=protocol,
                             status=status,
                             process=process_name,
@@ -620,10 +617,10 @@ class MonitorService:
             )
 
     # 添加类变量来缓存进程数据
-    _cached_processes: List[ProcessInfo] = []
+    _cached_processes: list[ProcessInfo] = []
     _last_process_update_time = 0
 
-    def get_processes_info(self) -> List[ProcessInfo]:
+    def get_processes_info(self) -> list[ProcessInfo]:
         """获取进程信息"""
         current_time = time.time()
         processes = []

@@ -5,9 +5,8 @@ import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
-from app.core.logging_config import get_logger
-from app.models.monitor import MonitorData
-from app.services.monitor_service import MonitorService
+from ..core.logging_config import get_logger
+from ..services.monitor_service import MonitorService
 
 # 获取日志记录器
 logger = get_logger(__name__)

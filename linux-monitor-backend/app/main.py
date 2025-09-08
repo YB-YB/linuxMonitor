@@ -1,15 +1,28 @@
 import asyncio
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.monitor import router as monitor_router
-from app.core.logging_config import get_logger, setup_logging
+from .api.monitor import router as monitor_router
+from .core.logging_config import get_logger, setup_logging
 
 # 设置日志配置
 setup_logging()
 logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动事件
+    logger.info("Linux系统监控API服务启动")
+    logger.info("API文档地址: http://localhost:8002/docs")
+    logger.info("WebSocket端点: ws://localhost:8002/api/monitor/ws")
+    yield
+    # 关闭事件
+    logger.info("Linux系统监控API服务关闭")
+
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -18,6 +31,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # 配置CORS中间件
@@ -49,19 +63,6 @@ async def health_check():
     """健康检查端点"""
     return {"status": "healthy", "service": "linux-monitor-api"}
 
-
-# 应用启动事件
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Linux系统监控API服务启动")
-    logger.info("API文档地址: http://localhost:8002/docs")
-    logger.info("WebSocket端点: ws://localhost:8002/api/monitor/ws")
-
-
-# 应用关闭事件
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Linux系统监控API服务关闭")
 
 
 def main():

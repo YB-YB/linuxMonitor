@@ -9,7 +9,7 @@ import sys
 
 import uvicorn
 
-from app.core.logging_config import get_logger, setup_logging
+from .app.core.logging_config import get_logger, setup_logging
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

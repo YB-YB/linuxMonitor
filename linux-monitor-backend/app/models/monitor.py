@@ -1,6 +1,3 @@
-from datetime import datetime
-from typing import List, Optional
-
 from pydantic import BaseModel
 
 
@@ -8,15 +5,15 @@ class SystemInfo(BaseModel):
     hostname: str
     platform: str
     uptime: int
-    loadAverage: List[float]
+    loadAverage: list[float]
     timestamp: int
 
 
 class CpuInfo(BaseModel):
     usage: float
-    cores: List[float]
+    cores: list[float]
     frequency: float
-    temperature: Optional[float] = None
+    temperature: float | None = None
     timestamp: int
 
 
@@ -66,8 +63,8 @@ class OpenPort(BaseModel):
     port: int
     protocol: str
     status: str
-    process: Optional[str] = None
-    pid: Optional[int] = None
+    process: str | None = None
+    pid: int | None = None
 
 
 class NetworkInfo(BaseModel):
@@ -76,8 +73,8 @@ class NetworkInfo(BaseModel):
     totalSent: int
     totalReceived: int
     connections: NetworkConnections
-    interfaces: List[NetworkInterface]
-    openPorts: List[OpenPort]
+    interfaces: list[NetworkInterface]
+    openPorts: list[OpenPort]
     timestamp: int
 
 
@@ -95,4 +92,4 @@ class MonitorData(BaseModel):
     memory: MemoryInfo
     disk: DiskInfo
     network: NetworkInfo
-    processes: List[ProcessInfo]
+    processes: list[ProcessInfo]
