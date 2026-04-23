@@ -86,7 +86,7 @@ async def get_system_info():
     """获取系统基本信息"""
     try:
         system_info = monitor_service.get_system_info()
-        return {"success": True, "data": system_info.dict()}
+        return {"success": True, "data": system_info.model_dump()}
     except Exception as e:
         logger.error(f"获取系统信息失败: {e}")
         return JSONResponse(
@@ -99,7 +99,7 @@ async def get_cpu_info():
     """获取CPU信息"""
     try:
         cpu_info = monitor_service.get_cpu_info()
-        return {"success": True, "data": cpu_info.dict()}
+        return {"success": True, "data": cpu_info.model_dump()}
     except Exception as e:
         logger.error(f"获取CPU信息失败: {e}")
         return JSONResponse(
@@ -112,7 +112,7 @@ async def get_memory_info():
     """获取内存信息"""
     try:
         memory_info = monitor_service.get_memory_info()
-        return {"success": True, "data": memory_info.dict()}
+        return {"success": True, "data": memory_info.model_dump()}
     except Exception as e:
         logger.error(f"获取内存信息失败: {e}")
         return JSONResponse(
@@ -125,7 +125,7 @@ async def get_disk_info():
     """获取磁盘信息"""
     try:
         disk_info = monitor_service.get_disk_info()
-        return {"success": True, "data": disk_info.dict()}
+        return {"success": True, "data": disk_info.model_dump()}
     except Exception as e:
         logger.error(f"获取磁盘信息失败: {e}")
         return JSONResponse(
@@ -138,7 +138,7 @@ async def get_network_info():
     """获取网络信息"""
     try:
         network_info = monitor_service.get_network_info()
-        return {"success": True, "data": network_info.dict()}
+        return {"success": True, "data": network_info.model_dump()}
     except Exception as e:
         logger.error(f"获取网络信息失败: {e}")
         return JSONResponse(
@@ -151,7 +151,7 @@ async def get_processes_info():
     """获取进程信息"""
     try:
         processes_info = monitor_service.get_processes_info()
-        return {"success": True, "data": [p.dict() for p in processes_info]}
+        return {"success": True, "data": [p.model_dump() for p in processes_info]}
     except Exception as e:
         logger.error(f"获取进程信息失败: {e}")
         return JSONResponse(
@@ -177,105 +177,92 @@ async def get_processes_info():
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket端点，实时推送监控数据"""
+    logger.info("WebSocket连接请求到达")
     try:
         await manager.connect(websocket)
+        logger.info("WebSocket连接已接受")
 
         # 发送初始数据
         try:
-            # 获取当前时间戳
             current_timestamp = int(time.time() * 1000)
+            logger.info("开始获取初始系统数据...")
 
-            # 使用简化版数据，减少数据量
             system_info = monitor_service.get_system_info()
             cpu_info = monitor_service.get_cpu_info()
             memory_info = monitor_service.get_memory_info()
+            logger.info("初始系统数据获取完成")
 
-            # 构建简化的初始数据
             simple_data = {
                 "type": "monitor_data",
                 "data": {
-                    "system": system_info.dict(),
-                    "cpu": cpu_info.dict(),
-                    "memory": memory_info.dict(),
+                    "system": system_info.model_dump(),
+                    "cpu": cpu_info.model_dump(),
+                    "memory": memory_info.model_dump(),
                     "timestamp": current_timestamp,
                 },
             }
 
-            # 发送简化的初始数据
+            logger.info("准备发送初始简化数据...")
             await manager.send_personal_message(json.dumps(simple_data), websocket)
-            logger.info("初始数据发送成功")
+            logger.info("初始简化数据发送成功")
 
-            # 等待一段时间，确保初始数据已经被处理
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
-            # 发送完整数据
             try:
+                logger.info("开始获取完整监控数据...")
                 complete_data = monitor_service.get_all_monitor_data()
+                logger.info("完整监控数据获取完成")
                 message = json.dumps(
-                    {"type": "monitor_data", "data": complete_data.dict()}
+                    {"type": "monitor_data", "data": complete_data.model_dump()}
                 )
+                logger.info("准备发送完整数据...")
                 await manager.send_personal_message(message, websocket)
+                logger.info("完整数据发送成功")
             except Exception as e:
-                logger.error(f"发送完整数据失败: {str(e)}")
+                logger.error(f"发送完整数据失败: {str(e)}", exc_info=True)
         except Exception as e:
-            logger.error(f"发送初始数据失败: {str(e)}")
+            logger.error(f"发送初始数据失败: {str(e)}", exc_info=True)
 
-        # 持续发送监控数据
-        update_interval = 3  # 更新间隔（秒）
+        update_interval = 3
 
         while True:
             try:
-                # 每隔一段时间发送一次数据
                 await asyncio.sleep(update_interval)
 
-                # 检查连接是否仍然活跃
                 if websocket.client_state.name != "CONNECTED":
                     logger.info("客户端已断开连接，停止发送数据")
                     break
 
-                # 获取当前时间戳
                 current_timestamp = int(time.time() * 1000)
 
-                # 获取所有监控数据
-                system_info = monitor_service.get_system_info()
-                cpu_info = monitor_service.get_cpu_info()
-                memory_info = monitor_service.get_memory_info()
-                disk_info = monitor_service.get_disk_info()
-                network_info = monitor_service.get_network_info()
-                processes = monitor_service.get_processes_info()[
-                    :10
-                ]  # 只发送前10个进程
-
-                # 构建完整数据包
-                complete_data = {
+                complete_data = monitor_service.get_all_monitor_data()
+                complete_data_dict = {
                     "type": "monitor_data",
                     "data": {
-                        "system": system_info.dict(),
-                        "cpu": cpu_info.dict(),
-                        "memory": memory_info.dict(),
-                        "disk": disk_info.dict(),
-                        "network": network_info.dict(),
-                        "processes": [p.dict() for p in processes],
+                        "system": complete_data.system.model_dump(),
+                        "cpu": complete_data.cpu.model_dump(),
+                        "memory": complete_data.memory.model_dump(),
+                        "disk": complete_data.disk.model_dump(),
+                        "network": complete_data.network.model_dump(),
+                        "processes": [p.model_dump() for p in complete_data.processes],
                         "timestamp": current_timestamp,
                     },
                 }
 
-                # 发送完整数据
                 await manager.send_personal_message(
-                    json.dumps(complete_data), websocket
+                    json.dumps(complete_data_dict), websocket
                 )
 
             except WebSocketDisconnect:
                 logger.info("WebSocket客户端断开连接")
                 break
             except Exception as e:
-                logger.error(f"发送监控数据失败: {str(e)}")
-                # 不要立即退出循环，尝试在下一个周期继续发送
+                logger.error(f"发送监控数据失败: {str(e)}", exc_info=True)
                 await asyncio.sleep(1)
     except WebSocketDisconnect:
         logger.info("WebSocket客户端断开连接")
     except Exception as e:
-        logger.error(f"WebSocket连接异常: {e}")
+        logger.error(f"WebSocket连接异常: {e}", exc_info=True)
     finally:
         try:
             manager.disconnect(websocket)
@@ -291,7 +278,7 @@ async def broadcast_monitor_data():
             if manager.active_connections:
                 monitor_data = monitor_service.get_all_monitor_data()
                 message = json.dumps(
-                    {"type": "broadcast_data", "data": monitor_data.dict()}
+                    {"type": "broadcast_data", "data": monitor_data.model_dump()}
                 )
                 await manager.broadcast(message)
 

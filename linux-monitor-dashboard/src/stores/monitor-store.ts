@@ -96,146 +96,98 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
   
   setData: (newData) => {
     const now = Date.now();
-    
-    // 获取当前状态
     const state = get();
     const currentData = state.data || {} as MonitorData;
     
-    // 创建一个深拷贝的合并函数，确保对象正确合并
-    const deepMerge = (target: any, source: any): any => {
-      if (!source) return target;
-      if (!target) return source;
-      
-      const result = { ...target };
-      
-      Object.keys(source).forEach(key => {
-        if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
-          result[key] = deepMerge(result[key] || {}, source[key]);
-        } else {
-          result[key] = source[key];
-        }
-      });
-      
-      return result;
-    };
-    
-    // 合并数据，保留现有数据，更新新数据
-    // 注意：我们现在按模块接收数据，所以需要更精细地合并
-    const mergedData = {
-      ...currentData
-    } as MonitorData;
+    const mergedData = { ...currentData } as MonitorData;
     
     // 按模块合并数据，并更新模块加载状态
     if (newData.system) {
       mergedData.system = newData.system;
-      set(state => ({
-        moduleLoadingStates: { ...state.moduleLoadingStates, system: false },
-        moduleErrors: { ...state.moduleErrors, system: null }
+      set(s => ({
+        moduleLoadingStates: { ...s.moduleLoadingStates, system: false },
+        moduleErrors: { ...s.moduleErrors, system: null }
       }));
     }
     
     if (newData.cpu) {
       mergedData.cpu = newData.cpu;
-      set(state => ({
-        moduleLoadingStates: { ...state.moduleLoadingStates, cpu: false },
-        moduleErrors: { ...state.moduleErrors, cpu: null }
+      set(s => ({
+        moduleLoadingStates: { ...s.moduleLoadingStates, cpu: false },
+        moduleErrors: { ...s.moduleErrors, cpu: null }
       }));
     }
     
     if (newData.memory) {
       mergedData.memory = newData.memory;
-      set(state => ({
-        moduleLoadingStates: { ...state.moduleLoadingStates, memory: false },
-        moduleErrors: { ...state.moduleErrors, memory: null }
+      set(s => ({
+        moduleLoadingStates: { ...s.moduleLoadingStates, memory: false },
+        moduleErrors: { ...s.moduleErrors, memory: null }
       }));
     }
     
     if (newData.disk) {
       mergedData.disk = newData.disk;
-      set(state => ({
-        moduleLoadingStates: { ...state.moduleLoadingStates, disk: false },
-        moduleErrors: { ...state.moduleErrors, disk: null }
+      set(s => ({
+        moduleLoadingStates: { ...s.moduleLoadingStates, disk: false },
+        moduleErrors: { ...s.moduleErrors, disk: null }
       }));
     }
     
     if (newData.network) {
-      mergedData.network = deepMerge(mergedData.network, newData.network);
-      set(state => ({
-        moduleLoadingStates: { ...state.moduleLoadingStates, network: false },
-        moduleErrors: { ...state.moduleErrors, network: null }
+      mergedData.network = newData.network;
+      set(s => ({
+        moduleLoadingStates: { ...s.moduleLoadingStates, network: false },
+        moduleErrors: { ...s.moduleErrors, network: null }
       }));
     }
     
     if (newData.processes) {
       mergedData.processes = newData.processes;
-      set(state => ({
-        moduleLoadingStates: { ...state.moduleLoadingStates, processes: false },
-        moduleErrors: { ...state.moduleErrors, processes: null }
+      set(s => ({
+        moduleLoadingStates: { ...s.moduleLoadingStates, processes: false },
+        moduleErrors: { ...s.moduleErrors, processes: null }
       }));
     }
     
-    // 更新当前数据
-    set({ 
-      data: mergedData, 
-      lastUpdate: now, 
-      error: null 
-    });
+    set({ data: mergedData, lastUpdate: now, error: null });
     
-    console.log('数据已更新:', Object.keys(newData).join(', '));
-    
-    // 更新历史数据 - 只有在收到相应模块数据时才更新历史记录
-    
-    // CPU历史数据
+    // 更新历史数据
     if (newData.cpu) {
       const newCpuHistory = [...state.cpuHistory, {
         timestamp: now,
         usage: newData.cpu.usage
       }];
-      
-      // 保留最近30个数据点
       if (newCpuHistory.length > 30) {
         newCpuHistory.shift();
       }
-      
       set({ cpuHistory: newCpuHistory });
-      console.log('CPU历史数据已更新');
     }
     
-    // 内存历史数据
     if (newData.memory) {
       const newMemoryHistory = [...state.memoryHistory, {
         timestamp: now,
         percent: newData.memory.percent,
         used: newData.memory.used
       }];
-      
-      // 保留最近30个数据点
       if (newMemoryHistory.length > 30) {
         newMemoryHistory.shift();
       }
-      
       set({ memoryHistory: newMemoryHistory });
-      console.log('内存历史数据已更新');
     }
     
-    // 网络历史数据
     if (newData.network) {
       const newNetworkHistory = [...state.networkHistory, {
         timestamp: now,
         uploadSpeed: newData.network.uploadSpeed,
         downloadSpeed: newData.network.downloadSpeed
       }];
-      
-      // 保留最近30个数据点
       if (newNetworkHistory.length > 30) {
         newNetworkHistory.shift();
       }
-      
       set({ networkHistory: newNetworkHistory });
-      console.log('网络历史数据已更新');
     }
     
-    // 磁盘历史数据
     if (newData.disk) {
       const newDiskHistory = [...state.diskHistory, {
         timestamp: now,
@@ -243,14 +195,10 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
         writeSpeed: newData.disk.writeSpeed,
         percent: newData.disk.percent
       }];
-      
-      // 保留最近30个数据点
       if (newDiskHistory.length > 30) {
         newDiskHistory.shift();
       }
-      
       set({ diskHistory: newDiskHistory });
-      console.log('磁盘历史数据已更新');
     }
   },
   

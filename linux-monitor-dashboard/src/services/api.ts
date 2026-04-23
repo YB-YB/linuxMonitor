@@ -8,13 +8,12 @@ export interface ApiResponse<T> {
 
 class ApiService {
   private pollingInterval: number | null = null;
-  private pollingDelay = config.pollingInterval; // 从配置中获取轮询间隔
-  private isRequestPending = false; // 请求锁，防止重复请求
-  private pollingCount = 0; // 轮询计数器，用于控制不同数据的获取频率
-  private requestTimeouts: Record<string, number> = {}; // 请求超时计时器
-  private requestRetries: Record<string, number> = {}; // 请求重试次数
-  private maxRetries = config.maxRetries; // 从配置中获取最大重试次数
-  private requestTimeout = config.requestTimeout; // 从配置中获取请求超时时间
+  private pollingDelay = config.pollingInterval;
+  private isRequestPending = false;
+  private pollingCount = 0;
+  private requestRetries: Record<string, number> = {};
+  private maxRetries = config.maxRetries;
+  private requestTimeout = config.requestTimeout;
 
   // HTTP API调用
   async get<T>(endpoint: string): Promise<T> {
@@ -25,10 +24,12 @@ class ApiService {
       this.requestRetries[endpoint] = 0;
     }
     
+    let timeoutId: number | undefined;
+    
     try {
       // 创建一个可以超时的请求
       const timeoutPromise = new Promise<never>((_, reject) => {
-        this.requestTimeouts[requestId] = window.setTimeout(() => {
+        timeoutId = window.setTimeout(() => {
           reject(new Error(`请求超时: ${endpoint}`));
         }, this.requestTimeout);
       });
@@ -38,12 +39,6 @@ class ApiService {
       
       // 使用 Promise.race 实现超时控制
       const response = await Promise.race([fetchPromise, timeoutPromise]);
-      
-      // 清除超时计时器
-      if (this.requestTimeouts[requestId]) {
-        clearTimeout(this.requestTimeouts[requestId]);
-        delete this.requestTimeouts[requestId];
-      }
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -59,12 +54,6 @@ class ApiService {
       
       return result.data;
     } catch (error) {
-      // 清除超时计时器
-      if (this.requestTimeouts[requestId]) {
-        clearTimeout(this.requestTimeouts[requestId]);
-        delete this.requestTimeouts[requestId];
-      }
-      
       // 增加重试计数
       this.requestRetries[endpoint]++;
       
@@ -72,12 +61,16 @@ class ApiService {
       
       // 如果未超过最大重试次数，则重试
       if (this.requestRetries[endpoint] <= this.maxRetries) {
-        console.log(`将在 ${this.requestRetries[endpoint] * 1000}ms 后重试...`);
         await new Promise(resolve => setTimeout(resolve, this.requestRetries[endpoint] * 1000));
         return this.get(endpoint);
       }
       
       throw error;
+    } finally {
+      // 确保超时计时器被清理
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     }
   }
 
@@ -158,138 +151,57 @@ class ApiService {
   
   // 获取数据的具体实现 - 按调度规则分别调用接口，并单独更新每个模块
   private async fetchData(onDataReceived: (data: any) => void, onError?: (error: Error) => void) {
-    // 如果有请求正在进行中，则跳过本次请求
     if (this.isRequestPending) {
-      console.log('上一个请求尚未完成，跳过本次请求');
       return;
     }
     
     try {
       this.isRequestPending = true;
-      
-      // 计算轮询次数
       this.pollingCount = (this.pollingCount || 0) + 1;
-      console.log(`第 ${this.pollingCount} 次轮询开始...`);
       
-      // 单独获取每个模块的数据，并在获取后立即发送，而不是等待所有数据都获取完毕
-      
-      // 获取系统信息
-      this.getSystemInfo()
-        .then(systemInfo => {
-          console.log('系统数据获取成功');
-          onDataReceived({
-            type: 'module_data',
-            module: 'system',
-            data: systemInfo
+      // 并行获取高频数据（系统、CPU、内存）
+      const fetchWithCallback = <T>(
+        fetchFn: () => Promise<T>,
+        module: string,
+        successMsg: string,
+        errorMsg: string
+      ) => {
+        fetchFn()
+          .then(data => {
+            onDataReceived({ type: 'module_data', module, data });
+          })
+          .catch(error => {
+            if (onError) {
+              onError(new Error(`${errorMsg}: ${error.message}`));
+            }
           });
-        })
-        .catch(error => {
-          console.error('获取系统数据失败:', error);
-          if (onError) {
-            onError(new Error('获取系统数据失败: ' + error.message));
-          }
-        });
-      
-      // 获取CPU信息
-      this.getCpuInfo()
-        .then(cpuInfo => {
-          console.log('CPU数据获取成功');
-          onDataReceived({
-            type: 'module_data',
-            module: 'cpu',
-            data: cpuInfo
-          });
-        })
-        .catch(error => {
-          console.error('获取CPU数据失败:', error);
-          if (onError) {
-            onError(new Error('获取CPU数据失败: ' + error.message));
-          }
-        });
-      
-      // 获取内存信息
-      this.getMemoryInfo()
-        .then(memoryInfo => {
-          console.log('内存数据获取成功');
-          onDataReceived({
-            type: 'module_data',
-            module: 'memory',
-            data: memoryInfo
-          });
-        })
-        .catch(error => {
-          console.error('获取内存数据失败:', error);
-          if (onError) {
-            onError(new Error('获取内存数据失败: ' + error.message));
-          }
-        });
+      };
+
+      fetchWithCallback(() => this.getSystemInfo(), 'system', '系统数据获取成功', '获取系统数据失败');
+      fetchWithCallback(() => this.getCpuInfo(), 'cpu', 'CPU数据获取成功', '获取CPU数据失败');
+      fetchWithCallback(() => this.getMemoryInfo(), 'memory', '内存数据获取成功', '获取内存数据失败');
       
       // 每隔2次轮询获取磁盘数据（6秒一次）
       if (this.pollingCount % 2 === 0) {
-        this.getDiskInfo()
-          .then(diskInfo => {
-            console.log('磁盘数据获取成功');
-            onDataReceived({
-              type: 'module_data',
-              module: 'disk',
-              data: diskInfo
-            });
-          })
-          .catch(error => {
-            console.error('获取磁盘数据失败:', error);
-            if (onError) {
-              onError(new Error('获取磁盘数据失败: ' + error.message));
-            }
-          });
+        fetchWithCallback(() => this.getDiskInfo(), 'disk', '磁盘数据获取成功', '获取磁盘数据失败');
       }
       
       // 每隔3次轮询获取网络数据（9秒一次）
       if (this.pollingCount % 3 === 0) {
-        this.getNetworkInfo()
-          .then(networkInfo => {
-            console.log('网络数据获取成功');
-            onDataReceived({
-              type: 'module_data',
-              module: 'network',
-              data: networkInfo
-            });
-          })
-          .catch(error => {
-            console.error('获取网络数据失败:', error);
-            if (onError) {
-              onError(new Error('获取网络数据失败: ' + error.message));
-            }
-          });
+        fetchWithCallback(() => this.getNetworkInfo(), 'network', '网络数据获取成功', '获取网络数据失败');
       }
       
       // 每隔5次轮询获取进程数据（15秒一次）
       if (this.pollingCount % 5 === 0) {
-        this.getProcessesInfo()
-          .then(processesInfo => {
-            console.log('进程数据获取成功');
-            onDataReceived({
-              type: 'module_data',
-              module: 'processes',
-              data: processesInfo
-            });
-          })
-          .catch(error => {
-            console.error('获取进程数据失败:', error);
-            if (onError) {
-              onError(new Error('获取进程数据失败: ' + error.message));
-            }
-          });
+        fetchWithCallback(() => this.getProcessesInfo(), 'processes', '进程数据获取成功', '获取进程数据失败');
       }
       
-      console.log(`第 ${this.pollingCount} 次轮询已启动，各模块将独立更新`);
-      
-      // 设置一个定时器，在所有请求可能完成后重置请求状态
+      // 等待足够时间后重置请求锁，确保所有异步请求有足够时间完成
       setTimeout(() => {
         this.isRequestPending = false;
-      }, 3000);
+      }, this.requestTimeout + 1000);
       
     } catch (error) {
-      console.error('启动数据获取失败:', error);
       if (onError) {
         onError(error as Error);
       }

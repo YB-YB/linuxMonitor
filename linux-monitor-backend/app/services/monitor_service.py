@@ -2,6 +2,7 @@ import os
 import platform
 import socket
 import time
+from collections import namedtuple
 from typing import Any
 
 import psutil
@@ -19,6 +20,9 @@ from ..models.monitor import (
     ProcessInfo,
     SystemInfo,
 )
+
+# 定义命名元组用于存储网络I/O统计
+NetIOCounters = namedtuple('NetIOCounters', ['bytes_sent', 'bytes_recv'])
 
 # 获取日志记录器
 logger = get_logger(__name__)
@@ -550,8 +554,31 @@ class MonitorService:
         current_time = time.time()
 
         try:
-            # 获取网络I/O统计
-            net_io = psutil.net_io_counters()
+            # 只统计物理网卡的流量，排除回环和虚拟接口
+            net_io = psutil.net_io_counters(pernic=True)
+            
+            # 需要排除的接口前缀
+            excluded_prefixes = ('lo', 'docker', 'veth', 'br-', 'cni', 'flannel', 'calico')
+            
+            # 累计物理网卡的流量
+            total_bytes_sent = 0
+            total_bytes_recv = 0
+            
+            for iface_name, iface_stats in net_io.items():
+                # 跳过回环接口和虚拟接口
+                if any(iface_name.startswith(prefix) for prefix in excluded_prefixes):
+                    continue
+                # 跳过没有IP地址的接口（通常是未使用的虚拟接口）
+                try:
+                    addrs = psutil.net_if_addrs().get(iface_name, [])
+                    has_ip = any(addr.family == psutil.AF_INET for addr in addrs)
+                    if not has_ip:
+                        continue
+                except Exception:
+                    continue
+                    
+                total_bytes_sent += iface_stats.bytes_sent
+                total_bytes_recv += iface_stats.bytes_recv
 
             upload_speed = 0.0
             download_speed = 0.0
@@ -559,14 +586,12 @@ class MonitorService:
             if self.last_network_io and self.last_time:
                 time_delta = current_time - self.last_time
                 if time_delta > 0:
-                    upload_speed = (
-                        net_io.bytes_sent - self.last_network_io.bytes_sent
-                    ) / time_delta
-                    download_speed = (
-                        net_io.bytes_recv - self.last_network_io.bytes_recv
-                    ) / time_delta
+                    upload_speed = max(0, (total_bytes_sent - self.last_network_io.bytes_sent)) / time_delta
+                    download_speed = max(0, (total_bytes_recv - self.last_network_io.bytes_recv)) / time_delta
 
-            self.last_network_io = net_io
+            # 使用模块级定义的命名元组存储累计值
+            self.last_network_io = NetIOCounters(bytes_sent=total_bytes_sent, bytes_recv=total_bytes_recv)
+            self.last_time = current_time
 
             # 获取网络接口、连接统计和开放端口
             interfaces = self.get_network_interfaces()
@@ -576,8 +601,8 @@ class MonitorService:
             network_info = NetworkInfo(
                 uploadSpeed=upload_speed,
                 downloadSpeed=download_speed,
-                totalSent=net_io.bytes_sent,
-                totalReceived=net_io.bytes_recv,
+                totalSent=total_bytes_sent,
+                totalReceived=total_bytes_recv,
                 connections=connections,
                 interfaces=interfaces,
                 openPorts=open_ports,

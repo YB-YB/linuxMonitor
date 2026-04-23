@@ -22,23 +22,15 @@ export function OverviewCard({
   color = 'blue',
   isLoading = false
 }: OverviewCardProps) {
-  // 添加动画状态
   const [isAnimating, setIsAnimating] = useState(false);
-  const [prevValue, setPrevValue] = useState(value);
-  const [prevPercentage, setPrevPercentage] = useState(percentage);
   
-  // 当值变化时触发动画
   useEffect(() => {
-    if (value !== prevValue || percentage !== prevPercentage) {
-      setIsAnimating(true);
-      const timer = setTimeout(() => {
-        setIsAnimating(false);
-        setPrevValue(value);
-        setPrevPercentage(percentage);
-      }, 600); // 动画持续时间
-      return () => clearTimeout(timer);
-    }
-  }, [value, percentage, prevValue, prevPercentage]);
+    setIsAnimating(true);
+    const timer = setTimeout(() => {
+      setIsAnimating(false);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [value, percentage]);
   const colorClasses = {
     blue: {
       icon: 'text-blue-400',

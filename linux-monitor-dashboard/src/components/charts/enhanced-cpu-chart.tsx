@@ -1,11 +1,44 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as echarts from 'echarts';
 import { useMonitorStore } from '@/stores/monitor-store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Cpu, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { CpuInfo, SystemInfo } from '@/types/monitor';
+import { formatFrequency } from '@/utils/format';
 
-// 内联定义历史数据类型
+// ==================== 常量定义 ====================
+
+// 趋势计算相关常量
+const TREND_DATA_POINTS_COUNT = 5;
+const TREND_THRESHOLD_PERCENT = 5;
+
+// 图表配置常量
+const CHART_ANIMATION_DURATION = 1000;
+const CHART_LOADING_DELAY_MS = 500;
+const DATA_UPDATE_ANIMATION_MS = 600;
+
+// 颜色配置
+const COLORS = {
+  primary: '#3b82f6',
+  primaryDark: '#1e40af',
+  primaryLight: '#60a5fa',
+  gridLine: '#334155',
+  axisLine: '#475569',
+  axisLabel: '#94a3b8',
+  tooltipBg: 'rgba(15, 23, 42, 0.95)',
+  tooltipText: '#f1f5f9',
+} as const;
+
+// 状态颜色映射
+const STATUS_COLOR_MAP = {
+  low: 'text-green-400',
+  medium: 'text-yellow-400',
+  high: 'text-red-400',
+  unknown: 'text-slate-400',
+} as const;
+
+// ==================== 类型定义 ====================
+
 interface HistoryItem {
   timestamp: number;
 }
@@ -14,52 +47,129 @@ interface CpuHistoryItem extends HistoryItem {
   usage: number;
 }
 
+// ==================== 工具函数 ====================
+
+/**
+ * 验证CPU历史数据项是否有效
+ */
+const isValidCpuHistoryItem = (item: unknown): item is CpuHistoryItem => {
+  return (
+    item !== null &&
+    typeof item === 'object' &&
+    'usage' in item &&
+    'timestamp' in item &&
+    typeof (item as CpuHistoryItem).usage === 'number' &&
+    !isNaN((item as CpuHistoryItem).usage)
+  );
+};
+
+/**
+ * 过滤并验证CPU历史数据
+ */
+const filterValidHistory = (history: unknown[]): CpuHistoryItem[] => {
+  return history.filter(isValidCpuHistoryItem);
+};
+
+/**
+ * 计算CPU使用率趋势
+ * @param cpuHistory CPU历史数据数组
+ * @returns 'up' | 'down' | 'stable'
+ */
+const calculateTrend = (cpuHistory: unknown[]): 'up' | 'down' | 'stable' => {
+  if (!Array.isArray(cpuHistory) || cpuHistory.length < 2) {
+    return 'stable';
+  }
+
+  const validHistory = filterValidHistory(cpuHistory);
+  
+  if (validHistory.length < 2) {
+    return 'stable';
+  }
+
+  const recentData = validHistory.slice(-TREND_DATA_POINTS_COUNT);
+  const averageUsage = recentData.reduce((sum, item) => sum + item.usage, 0) / recentData.length;
+  const currentUsage = validHistory[validHistory.length - 1].usage;
+
+  if (currentUsage > averageUsage + TREND_THRESHOLD_PERCENT) {
+    return 'up';
+  }
+  
+  if (currentUsage < averageUsage - TREND_THRESHOLD_PERCENT) {
+    return 'down';
+  }
+  
+  return 'stable';
+};
+
+/**
+ * 根据CPU使用率获取状态颜色类名
+ */
+const getStatusColorClass = (usage: number): string => {
+  if (isNaN(usage)) {
+    return STATUS_COLOR_MAP.unknown;
+  }
+  
+  if (usage < 50) {
+    return STATUS_COLOR_MAP.low;
+  }
+  
+  if (usage < 80) {
+    return STATUS_COLOR_MAP.medium;
+  }
+  
+  return STATUS_COLOR_MAP.high;
+};
+
+/**
+ * 格式化时间戳为本地时间字符串
+ */
+const formatTimestamp = (timestamp: number): string => {
+  try {
+    return new Date(timestamp).toLocaleTimeString('zh-CN', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return '无效时间';
+  }
+};
+
+/**
+ * 安全格式化数值，处理undefined和NaN
+ */
+const safeFormatNumber = (value: number | undefined, decimals: number): string => {
+  if (value === undefined || isNaN(value)) {
+    return '0.0';
+  }
+  return value.toFixed(decimals);
+};
+
+// ==================== 主组件 ====================
+
 export function EnhancedCpuChart() {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
   const { cpuHistory, data } = useMonitorStore();
 
-  // 计算趋势
-  const getTrend = () => {
-    if (!cpuHistory || !Array.isArray(cpuHistory) || cpuHistory.length < 2) return 'stable';
-    
-    try {
-      // 获取最近5个有效数据点
-      const validHistory = cpuHistory.filter(item => 
-        item && typeof item === 'object' && item.usage !== undefined && !isNaN(item.usage)
-      );
-      
-      if (validHistory.length < 2) return 'stable';
-      
-      const recent = validHistory.slice(-5);
-      const avg = recent.reduce((sum, item) => sum + (item.usage || 0), 0) / recent.length;
-      const current = validHistory[validHistory.length - 1]?.usage || 0;
-      
-      if (current > avg + 5) return 'up';
-      if (current < avg - 5) return 'down';
-      return 'stable';
-    } catch (error) {
-      console.error('计算CPU趋势时出错:', error);
-      return 'stable';
-    }
-  };
+  const [isChartReady, setIsChartReady] = useState(false);
+  const [isDataUpdating, setIsDataUpdating] = useState(false);
 
-  const trend = getTrend();
+  // 计算趋势（使用 useMemo 优化）
+  const trend = calculateTrend(cpuHistory);
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus;
 
-  useEffect(() => {
-    if (!chartRef.current) return;
-
-    chartInstance.current = echarts.init(chartRef.current, 'dark');
-
-    const option: echarts.EChartsOption = {
+  // 获取图表配置对象（提取为独立函数，避免每次渲染重建）
+  const getChartOption = useCallback((): echarts.EChartsOption => {
+    return {
       backgroundColor: 'transparent',
       grid: {
         left: '3%',
         right: '4%',
         bottom: '8%',
         top: '10%',
-        containLabel: true
+        containLabel: true,
       },
       xAxis: {
         type: 'category',
@@ -67,38 +177,38 @@ export function EnhancedCpuChart() {
         data: [],
         axisLine: {
           lineStyle: {
-            color: '#475569'
-          }
+            color: COLORS.axisLine,
+          },
         },
         axisLabel: {
-          color: '#94a3b8',
-          fontSize: 11
+          color: COLORS.axisLabel,
+          fontSize: 11,
         },
         axisTick: {
-          show: false
-        }
+          show: false,
+        },
       },
       yAxis: {
         type: 'value',
         min: 0,
         max: 100,
         axisLine: {
-          show: false
+          show: false,
         },
         axisLabel: {
-          color: '#94a3b8',
+          color: COLORS.axisLabel,
           formatter: '{value}%',
-          fontSize: 11
+          fontSize: 11,
         },
         splitLine: {
           lineStyle: {
-            color: '#334155',
-            type: 'dashed'
-          }
+            color: COLORS.gridLine,
+            type: 'dashed',
+          },
         },
         axisTick: {
-          show: false
-        }
+          show: false,
+        },
       },
       series: [
         {
@@ -108,64 +218,60 @@ export function EnhancedCpuChart() {
           symbol: 'circle',
           symbolSize: 4,
           lineStyle: {
-            color: '#3b82f6',
+            color: COLORS.primary,
             width: 3,
             shadowColor: 'rgba(59, 130, 246, 0.3)',
-            shadowBlur: 10
+            shadowBlur: 10,
           },
           itemStyle: {
-            color: '#3b82f6',
-            borderColor: '#1e40af',
-            borderWidth: 2
+            color: COLORS.primary,
+            borderColor: COLORS.primaryDark,
+            borderWidth: 2,
           },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              {
-                offset: 0,
-                color: 'rgba(59, 130, 246, 0.4)'
-              },
-              {
-                offset: 0.5,
-                color: 'rgba(59, 130, 246, 0.2)'
-              },
-              {
-                offset: 1,
-                color: 'rgba(59, 130, 246, 0.05)'
-              }
-            ])
+              { offset: 0, color: 'rgba(59, 130, 246, 0.4)' },
+              { offset: 0.5, color: 'rgba(59, 130, 246, 0.2)' },
+              { offset: 1, color: 'rgba(59, 130, 246, 0.05)' },
+            ]),
           },
           data: [],
           emphasis: {
             focus: 'series',
             itemStyle: {
-              color: '#60a5fa',
-              borderColor: '#3b82f6',
+              color: COLORS.primaryLight,
+              borderColor: COLORS.primary,
               borderWidth: 3,
               shadowColor: 'rgba(59, 130, 246, 0.6)',
-              shadowBlur: 15
-            }
-          }
-        }
+              shadowBlur: 15,
+            },
+          },
+        },
       ],
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-        borderColor: '#475569',
+        backgroundColor: COLORS.tooltipBg,
+        borderColor: COLORS.axisLine,
         borderWidth: 1,
         textStyle: {
-          color: '#f1f5f9',
-          fontSize: 12
+          color: COLORS.tooltipText,
+          fontSize: 12,
         },
-        formatter: (params: any) => {
-          const data = params[0];
+        formatter: (params: unknown) => {
+          const paramsArray = params as Array<{ name: string; value: number }>;
+          if (!paramsArray || paramsArray.length === 0) {
+            return '';
+          }
+          
+          const dataPoint = paramsArray[0];
           return `
             <div style="padding: 8px;">
-              <div style="color: #3b82f6; font-weight: bold; margin-bottom: 4px;">
-                ${data.name}
+              <div style="color: ${COLORS.primary}; font-weight: bold; margin-bottom: 4px;">
+                ${dataPoint.name}
               </div>
               <div style="display: flex; align-items: center;">
-                <div style="width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; margin-right: 8px;"></div>
-                CPU使用率: <strong style="margin-left: 4px;">${data.value}%</strong>
+                <div style="width: 8px; height: 8px; background: ${COLORS.primary}; border-radius: 50%; margin-right: 8px;"></div>
+                CPU使用率: <strong style="margin-left: 4px;">${dataPoint.value}%</strong>
               </div>
             </div>
           `;
@@ -173,117 +279,120 @@ export function EnhancedCpuChart() {
         axisPointer: {
           type: 'cross',
           crossStyle: {
-            color: '#3b82f6',
-            opacity: 0.6
-          }
-        }
+            color: COLORS.primary,
+            opacity: 0.6,
+          },
+        },
       },
       animation: true,
-      animationDuration: 1000,
-      animationEasing: 'cubicOut'
+      animationDuration: CHART_ANIMATION_DURATION,
+      animationEasing: 'cubicOut',
     };
+  }, []);
 
-    chartInstance.current.setOption(option);
+  // 初始化图表
+  useEffect(() => {
+    if (!chartRef.current) {
+      return;
+    }
 
+    // 初始化图表实例
+    chartInstance.current = echarts.init(chartRef.current, 'dark');
+    chartInstance.current.setOption(getChartOption());
+
+    // 设置图表加载完成状态
+    const chartReadyTimer = setTimeout(() => {
+      setIsChartReady(true);
+    }, CHART_LOADING_DELAY_MS);
+
+    // 响应窗口大小变化
     const handleResize = () => {
       chartInstance.current?.resize();
     };
     window.addEventListener('resize', handleResize);
 
+    // 清理函数
     return () => {
+      clearTimeout(chartReadyTimer);
       window.removeEventListener('resize', handleResize);
       chartInstance.current?.dispose();
+      chartInstance.current = null;
     };
-  }, []);
+  }, [getChartOption]);
 
+  // 更新图表数据
   useEffect(() => {
-    if (!chartInstance.current) return;
-    if (!cpuHistory || !Array.isArray(cpuHistory) || cpuHistory.length === 0) return;
-
-    try {
-      // 确保数据有效性
-      const validHistory = cpuHistory.filter(item => 
-        item && typeof item === 'object' && item.timestamp !== undefined
-      );
-      
-      if (validHistory.length === 0) return;
-
-      const times = validHistory.map(item => {
-        try {
-          return new Date(item.timestamp).toLocaleTimeString('zh-CN', { 
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          });
-        } catch (e) {
-          return '无效时间';
-        }
-      });
-      
-      const values = validHistory.map(item => {
-        const usage = item.usage !== undefined ? item.usage : 0;
-        return isNaN(usage) ? 0 : parseFloat(usage.toFixed(1));
-      });
-
-      chartInstance.current.setOption({
-        xAxis: {
-          data: times
-        },
-        series: [{
-          data: values
-        }]
-      });
-    } catch (error) {
-      console.error('更新CPU图表时出错:', error);
+    if (!chartInstance.current) {
+      return;
     }
+
+    if (!Array.isArray(cpuHistory) || cpuHistory.length === 0) {
+      return;
+    }
+
+    const validHistory = filterValidHistory(cpuHistory);
+    
+    if (validHistory.length === 0) {
+      return;
+    }
+
+    // 触发数据更新动画
+    setIsDataUpdating(true);
+    const updateAnimationTimer = setTimeout(() => {
+      setIsDataUpdating(false);
+    }, DATA_UPDATE_ANIMATION_MS);
+
+    // 准备图表数据
+    const timeLabels = validHistory.map(item => formatTimestamp(item.timestamp));
+    const usageValues = validHistory.map(item => parseFloat(item.usage.toFixed(1)));
+
+    // 更新图表
+    chartInstance.current.setOption({
+      xAxis: {
+        data: timeLabels,
+      },
+      series: [{
+        data: usageValues,
+      }],
+    });
+
+    return () => {
+      clearTimeout(updateAnimationTimer);
+    };
   }, [cpuHistory]);
 
-  const getStatusColor = (usage: number) => {
-    if (isNaN(usage)) return 'text-slate-400';
-    if (usage < 50) return 'text-green-400';
-    if (usage < 80) return 'text-yellow-400';
-    return 'text-red-400';
-  };
+  // 安全获取CPU数据
+  const cpuData: CpuInfo | null = data?.cpu ?? null;
   
-  // 安全获取CPU和系统数据
-  const getCpuData = (): CpuInfo | null => {
-    if (!data || !data.cpu) return null;
-    return data.cpu;
-  };
-  
-  const getSystemData = (): SystemInfo | null => {
-    if (!data || !data.system) return null;
-    return data.system;
-  };
-  
-  const cpuData = getCpuData();
-  const systemData = getSystemData();
+  // 安全获取系统数据
+  const systemData: SystemInfo | null = data?.system ?? null;
 
-  // 添加加载状态动画
-  const [isChartReady, setIsChartReady] = useState(false);
-  const [isDataUpdating, setIsDataUpdating] = useState(false);
+  // 获取核心数量
+  const coreCount = Array.isArray(cpuData?.cores) ? cpuData.cores.length : 0;
   
-  // 当数据更新时触发动画
-  useEffect(() => {
-    if (cpuHistory && cpuHistory.length > 0) {
-      setIsDataUpdating(true);
-      const timer = setTimeout(() => {
-        setIsDataUpdating(false);
-      }, 600);
-      return () => clearTimeout(timer);
-    }
-  }, [cpuHistory]);
+  // 获取CPU使用率
+  const cpuUsage = cpuData?.usage ?? 0;
   
-  // 图表初始化完成后设置状态
-  useEffect(() => {
-    if (chartInstance.current) {
-      const timer = setTimeout(() => {
-        setIsChartReady(true);
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [chartInstance.current]);
+  // 获取频率信息
+  const frequencyDisplay = cpuData?.frequency !== undefined 
+    ? formatFrequency(cpuData.frequency) 
+    : 'N/A';
+  
+  // 获取温度信息
+  const temperatureDisplay = (cpuData?.temperature !== undefined && 
+                              cpuData?.temperature !== null && 
+                              !isNaN(cpuData.temperature))
+    ? `${cpuData.temperature.toFixed(1)}°C`
+    : 'N/A';
+  
+  // 获取负载信息
+  const loadAverageDisplay = (systemData?.loadAverage && 
+                              Array.isArray(systemData.loadAverage) && 
+                              systemData.loadAverage.length > 0 && 
+                              systemData.loadAverage[0] !== undefined && 
+                              !isNaN(systemData.loadAverage[0]))
+    ? systemData.loadAverage[0].toFixed(2)
+    : 'N/A';
 
   return (
     <Card className="bg-slate-800/90 backdrop-blur-sm border-slate-700 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 relative overflow-hidden">
@@ -306,13 +415,11 @@ export function EnhancedCpuChart() {
         </CardTitle>
         {cpuData ? (
           <div className="text-right">
-            <div className={`text-3xl font-bold ${getStatusColor(cpuData.usage || 0)} mb-1 ${isDataUpdating ? 'animate-pulse' : ''}`}>
-              {(cpuData.usage !== undefined && !isNaN(cpuData.usage)) 
-                ? cpuData.usage.toFixed(1) 
-                : '0.0'}%
+            <div className={`text-3xl font-bold ${getStatusColorClass(cpuUsage)} mb-1 ${isDataUpdating ? 'animate-pulse' : ''}`}>
+              {safeFormatNumber(cpuUsage, 1)}%
             </div>
             <div className="flex items-center justify-end space-x-2 text-sm text-slate-400">
-              <span>{cpuData.cores && Array.isArray(cpuData.cores) ? cpuData.cores.length : 0} 核心</span>
+              <span>{coreCount} 核心</span>
               <TrendIcon className={`h-4 w-4 ${
                 trend === 'up' ? 'text-red-400' : 
                 trend === 'down' ? 'text-green-400' : 
@@ -342,11 +449,15 @@ export function EnhancedCpuChart() {
                 <div className="h-full bg-blue-500 animate-pulse-slow rounded-full" style={{width: '100%'}}></div>
               </div>
               <div className="mt-8 grid grid-cols-6 gap-2">
-                {[...Array(6)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-700/50 rounded animate-pulse" style={{
-                    animationDelay: `${i * 100}ms`,
-                    animationDuration: '1.5s'
-                  }}></div>
+                {[...Array(6)].map((_, index) => (
+                  <div 
+                    key={index} 
+                    className="h-16 bg-slate-700/50 rounded animate-pulse" 
+                    style={{
+                      animationDelay: `${index * 100}ms`,
+                      animationDuration: '1.5s',
+                    }}
+                  />
                 ))}
               </div>
             </div>
@@ -358,26 +469,19 @@ export function EnhancedCpuChart() {
             <div className="text-center">
               <div className="text-slate-400">频率</div>
               <div className={`text-white font-medium ${isDataUpdating ? 'animate-pulse' : ''}`}>
-                {cpuData.frequency !== undefined ? `${cpuData.frequency} MHz` : 'N/A'}
+                {frequencyDisplay}
               </div>
             </div>
             <div className="text-center">
               <div className="text-slate-400">温度</div>
               <div className={`text-white font-medium ${isDataUpdating ? 'animate-pulse' : ''}`}>
-                {cpuData.temperature !== undefined && cpuData.temperature !== null && !isNaN(cpuData.temperature) 
-                  ? `${cpuData.temperature.toFixed(1)}°C` 
-                  : 'N/A'}
+                {temperatureDisplay}
               </div>
             </div>
             <div className="text-center">
               <div className="text-slate-400">负载</div>
               <div className={`text-white font-medium ${isDataUpdating ? 'animate-pulse' : ''}`}>
-                {systemData.loadAverage && Array.isArray(systemData.loadAverage) && 
-                 systemData.loadAverage.length > 0 && 
-                 systemData.loadAverage[0] !== undefined && 
-                 !isNaN(systemData.loadAverage[0])
-                  ? systemData.loadAverage[0].toFixed(2) 
-                  : 'N/A'}
+                {loadAverageDisplay}
               </div>
             </div>
           </div>

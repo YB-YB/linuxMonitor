@@ -215,17 +215,6 @@ export function NetworkChart() {
     }
   }, [chartInstance.current]);
 
-  // 格式化字节数的函数
-  const formatBytesLocal = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
   return (
     <Card className="bg-slate-800/90 backdrop-blur-sm border-slate-700 hover:shadow-lg hover:shadow-purple-500/10 transition-all duration-300 relative overflow-hidden">
       {/* 加载状态遮罩 */}
@@ -295,13 +284,13 @@ export function NetworkChart() {
             <div className="text-center">
               <div className="text-slate-400">总发送</div>
               <div className={`text-white font-medium ${isDataUpdating ? 'animate-pulse' : ''}`}>
-                {networkData.totalSent ? formatBytesLocal(networkData.totalSent) : '0 B'}
+                {networkData.totalSent ? formatBytes(networkData.totalSent) : '0 B'}
               </div>
             </div>
             <div className="text-center">
               <div className="text-slate-400">总接收</div>
               <div className={`text-white font-medium ${isDataUpdating ? 'animate-pulse' : ''}`}>
-                {networkData.totalReceived ? formatBytesLocal(networkData.totalReceived) : '0 B'}
+                {networkData.totalReceived ? formatBytes(networkData.totalReceived) : '0 B'}
               </div>
             </div>
             <div className="text-center">

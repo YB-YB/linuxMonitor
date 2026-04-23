@@ -13,6 +13,18 @@ setup_logging()
 logger = get_logger(__name__)
 
 
+def get_allowed_origins() -> list[str]:
+    """根据环境变量获取允许的来源列表"""
+    env = os.getenv("APP_ENV", "development")
+    if env == "production":
+        origins_str = os.getenv("CORS_ORIGINS", "")
+        if origins_str:
+            return [o.strip() for o in origins_str.split(",") if o.strip()]
+        return []
+    # 开发环境允许所有来源
+    return ["*"]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动事件
@@ -37,7 +49,7 @@ app = FastAPI(
 # 配置CORS中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源，简化开发阶段的CORS配置
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

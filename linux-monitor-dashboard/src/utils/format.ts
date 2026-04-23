@@ -30,6 +30,17 @@ export function formatSpeed(bytesPerSecond: number): string {
   return formatBytes(bytesPerSecond) + '/s';
 }
 
+export function formatFrequency(frequency: number): string {
+  // 频率以 MHz 为单位
+  if (frequency >= 1000) {
+    // 转换为 GHz
+    return `${(frequency / 1000).toFixed(2)} GHz`;
+  } else {
+    // 保持为 MHz
+    return `${frequency.toFixed(1)} MHz`;
+  }
+}
+
 export function throttle<T extends (...args: any[]) => any>(
   func: T,
   delay: number

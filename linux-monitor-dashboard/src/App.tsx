@@ -9,7 +9,7 @@ import { ProcessTable } from '@/components/process-table';
 import { NetworkDetails } from '@/components/network-details';
 import { useMonitorStore } from '@/stores/monitor-store';
 import { Cpu, MemoryStick, HardDrive, Network } from 'lucide-react';
-import { formatBytes } from '@/utils/format';
+import { formatBytes, formatFrequency } from '@/utils/format';
 import { GlobalErrorBoundary } from '@/components/global-error-boundary';
 import { ErrorBoundary, withErrorBoundary } from '@/components/error-boundary';
 
@@ -55,26 +55,12 @@ function App() {
 
   // 初始化连接 - 只在组件挂载时执行一次
   useEffect(() => {
-    console.log('正在初始化连接...');
-    console.log('当前连接类型:', connectionType);
-    
-    // 初始化连接
     initializeConnection();
 
-    // 定期检查连接状态，但不主动触发重连
-    // 这样可以避免频繁重新渲染整个页面
-    const checkInterval = setInterval(() => {
-      // 只记录状态，不触发操作
-      console.log('连接状态检查:', isConnected ? '已连接' : '未连接');
-    }, 30000); // 增加检查间隔到30秒
-
-    // 清理函数
     return () => {
-      console.log('组件卸载，停止连接');
-      clearInterval(checkInterval);
       disconnect();
     };
-  }, []); // 空依赖数组，确保只在组件挂载时执行一次
+  }, []);
   
   // 设置连接超时 - 单独的useEffect
   useEffect(() => {
@@ -311,7 +297,7 @@ function App() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">频率:</span>
-                  <span className="text-white">{data.cpu.frequency} MHz</span>
+                  <span className="text-white">{formatFrequency(data.cpu.frequency)}</span>
                 </div>
                 {data.cpu.temperature && (
                   <div className="flex justify-between">
